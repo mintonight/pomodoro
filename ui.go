@@ -280,6 +280,7 @@ func (a *App) statsPage(c *ui.Context) {
 		// Which month the heatmap shows.
 		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
 			prevBtn := ui.ButtonBase(c).Label("上个月").Tooltip("上个月").Size(32, 32).Radius(16).
+				Border(1, t.Border.Alpha(0.6)).
 				Material(glass.Glass{Interactive: true}).Children(func() {
 				ui.Icon(c, chevronLeft).Size(16, 16).TextColor(t.Text)
 			})
@@ -288,6 +289,7 @@ func (a *App) statsPage(c *ui.Context) {
 			}
 			ui.Textf(c, "%d 年 %d 月", year, month).FontSize(16).Bold().Grow(1).TextAlign(ui.Center)
 			nextBtn := ui.ButtonBase(c).Label("下个月").Tooltip("下个月").Size(32, 32).Radius(16).
+				Border(1, t.Border.Alpha(0.6)).
 				Material(glass.Glass{Interactive: true}).Children(func() {
 				ui.Icon(c, chevronRight).Size(16, 16).TextColor(t.Text)
 			})
