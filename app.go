@@ -43,6 +43,9 @@ type App struct {
 	statYear  int
 	statMonth time.Month
 
+	// First-entry motion uses the UI frame clock, never the timer's clock.
+	timerEntered time.Time
+
 	// The settings page's controls, which hold what the user typed until it
 	// is stored. Syncing them out of the settings every frame would fight
 	// with the typing.

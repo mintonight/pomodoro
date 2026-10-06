@@ -5,6 +5,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 
 	"pomodoro/storage"
@@ -28,9 +29,10 @@ func (a *App) view(c *ui.Context) {
 	}
 
 	t := c.Theme()
-	ui.Column(c).Fill().Background(t.Background).Children(func() {
+	ui.Column(c).Fill().Background(t.Background).Draw(func(p *ui.Painter, r ui.Rect) {
+		paintWindowBackground(p, r, t.Dark)
+	}).Children(func() {
 		a.nav(c)
-		ui.Divider(c)
 		switch a.page {
 		case pageStats:
 			a.statsPage(c)
@@ -44,17 +46,66 @@ func (a *App) view(c *ui.Context) {
 
 // nav is the row of tabs at the top.
 func (a *App) nav(c *ui.Context) {
-	ui.Row(c).Padding(12, 16, 8, 16).Justify(ui.Center).Children(func() {
-		ui.Segmented(c, &a.page, "计时", "统计", "设置").Width(280)
+	t := c.Theme()
+	zone := ui.Row(c).Padding(16, 16, 8, 16).Justify(ui.Center)
+	keyboardFocus := false
+	zone.Children(func() {
+		parts := ui.SegmentedBase(c, &a.page, 3)
+		track := parts.Track.Label("页面导航").Width(288).Height(42).
+			Padding(4).Gap(0).Radius(12).Material(glass.Glass{})
+		position := track.Animate("selection", float32(a.page), 240*time.Millisecond)
+		track.Draw(func(p *ui.Painter, r ui.Rect) {
+			width := (r.W - 8) / 3
+			selected := ui.Rect{X: r.X + 4 + position*width, Y: r.Y + 4, W: width, H: r.H - 8}
+			glass.Paint(p, selected, 8, glass.Glass{})
+		})
+		track.Children(func() {
+			for i, label := range []string{"计时", "统计", "设置"} {
+				segment := parts.Segment(i).Grow(1).Width(0).Height(34).Radius(8)
+				keyboardFocus = keyboardFocus || segment.FocusVisible()
+				color := t.TextMuted
+				if i == a.page {
+					color = t.Text
+				}
+				segment.Children(func() { ui.Text(c, label).FontSize(14).TextColor(color).SingleLine() })
+			}
+		})
 	})
+	revealControls(zone, keyboardFocus)
+}
+
+// revealControls keeps the hit area and layout stable even while transparent.
+// Only keyboard-origin focus reveals it: mouse clicks must not pin it open.
+func revealControls(zone *ui.Element, keyboardFocus bool) {
+	_, _, over := zone.PointerPosition()
+	target := float32(0)
+	if over || keyboardFocus {
+		target = 1
+	}
+	zone.Opacity(zone.Animate("reveal", target, 180*time.Millisecond))
 }
 
 // #region the timer page
 
 func (a *App) timerPage(c *ui.Context, snap Snapshot) {
 	t := c.Theme()
-	ui.Column(c).Fill().Center().Gap(28).Padding(24).Children(func() {
-		ui.Text(c, phaseLabel(snap.Phase)).FontSize(15).TextColor(t.TextMuted)
+	page := ui.Column(c).Key("timer-page").Fill().Center().Gap(24).Padding(24)
+	// A finite first-entry reveal; subsequent frames and timer actions retain it.
+	if a.timerEntered.IsZero() {
+		a.timerEntered = c.Now()
+	}
+	entry := float32(c.Now().Sub(a.timerEntered)) / float32(320*time.Millisecond)
+	if entry < 1 && !c.Preferences().ReduceMotion {
+		page.Opacity(ui.EaseOut(max(0, entry))).Top(8 * (1 - ui.EaseOut(max(0, entry))))
+		c.AnimationFrame()
+	}
+	page.Children(func() {
+		ui.Box(c).Height(24).Width(248).Center().Children(func() {
+			ui.Text(c, phaseLabel(snap.Phase)).Key(snap.Phase).FontSize(14).FontWeight(600).
+				TextColor(t.TextMuted).Transition(ui.ElementTransition{
+				Duration: 180 * time.Millisecond, Enter: &ui.Motion{Y: 4},
+			})
+		})
 		a.ring(c, snap)
 		a.controls(c, snap)
 	})
@@ -65,62 +116,98 @@ func (a *App) ring(c *ui.Context, snap Snapshot) {
 	t := c.Theme()
 	color, track := ringColors(snap.Phase, t)
 
-	ui.Box(c).Size(248, 248).Children(func() {
+	ring := ui.Box(c).Key("countdown").Label("倒计时圆环").Size(248, 248)
+	progress := ring.Animate("progress", snap.Progress(), 280*time.Millisecond)
+	red := ring.Animate("red", float32(color.R), 240*time.Millisecond)
+	green := ring.Animate("green", float32(color.G), 240*time.Millisecond)
+	blue := ring.Animate("blue", float32(color.B), 240*time.Millisecond)
+	color = ui.RGB(uint8(red), uint8(green), uint8(blue))
+	ring.Children(func() {
 		// The ring itself.
 		ui.Box(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
-			const thickness float32 = 10
+			const thickness float32 = 8
 			cx, cy := r.X+r.W/2, r.Y+r.H/2
 			radius := min(r.W, r.H)/2 - thickness/2 - 2
 
 			p.StrokePath(arc(cx, cy, radius, 0, 1), thickness, track)
-			if progress := snap.Progress(); progress > 0 {
+			if progress > 0 {
 				p.StrokePath(arc(cx, cy, radius, 0, progress), thickness, color)
 			}
 		})
 
 		// The time in the middle. It is a real text element, so screen
 		// readers can read it and tests can find it, laid over the ring.
-		ui.Column(c).Attach(ui.AnchorCenter, ui.AnchorCenter).Gap(6).Children(func() {
-			ui.Text(c, clockLabel(snap)).Font("monospace").FontSize(46).
-				FontWeight(600).SingleLine()
-			switch snap.Phase {
-			case PhasePaused:
-				ui.Textf(c, "已暂停 %s", shortLabel(snap.PausedFor)).FontSize(12).TextColor(t.TextMuted)
-			case PhaseFocus, PhaseBreak:
-				ui.Textf(c, "已完成 %d%%", int(snap.Progress()*100+0.5)).FontSize(12).TextColor(t.TextMuted)
-			}
+		ui.Column(c).Attach(ui.AnchorCenter, ui.AnchorCenter).Width(224).AlignItems(ui.Center).Gap(8).Children(func() {
+			ui.Text(c, clockLabel(snap)).Font("monospace").FontSize(44).
+				FontWeight(600).SingleLine().TextAlign(ui.Center)
+			// Reserve the same line in every phase so the digits never jump.
+			ui.Box(c).Width(224).Height(22).Center().Children(func() {
+				label := "分钟 · 专注时间"
+				switch snap.Phase {
+				case PhasePaused:
+					label = "已暂停 " + shortLabel(snap.PausedFor)
+				case PhaseFocus, PhaseBreak:
+					label = fmt.Sprintf("已完成 %d%%", int(snap.Progress()*100+0.5))
+				}
+				ui.Text(c, label).Key(snap.Phase).FontSize(13).TextColor(t.TextMuted).
+					TextAlign(ui.Center).Transition(ui.ElementTransition{
+					Duration: 200 * time.Millisecond, Enter: &ui.Motion{Y: 5},
+				})
+			})
 		})
 	})
 }
 
 // controls builds the buttons of the current phase.
 func (a *App) controls(c *ui.Context, snap Snapshot) {
-	ui.Row(c).Gap(12).Justify(ui.Center).Children(func() {
-		switch snap.Phase {
-		case PhaseFocus:
-			if ui.Button(c, "暂停").Width(104).Clicked() {
+	zone := ui.Row(c).Key("timer-actions").Width(248).Height(44).Gap(12).Justify(ui.Center)
+	keyboardFocus := false
+	zone.Children(func() {
+		label, width := "开始", float32(160)
+		if snap.Phase == PhaseFocus {
+			label, width = "暂停", 118
+		} else if snap.Phase == PhasePaused {
+			label, width = "继续", 118
+		} else if snap.Phase == PhaseBreak {
+			label = "结束"
+		}
+		primary := ui.PrimaryButton(c, label).Width(width).Height(44).Radius(12).
+			Transition(ui.ElementTransition{Duration: 240 * time.Millisecond})
+		keyboardFocus = primary.FocusVisible()
+		buttonFeedback(primary)
+		if primary.Clicked() {
+			switch snap.Phase {
+			case PhaseFocus:
 				a.pause()
-			}
-			if ui.Button(c, "结束").Width(104).Clicked() {
-				a.endFocus()
-			}
-		case PhasePaused:
-			if ui.PrimaryButton(c, "继续").Width(104).Clicked() {
+			case PhasePaused:
 				a.resume()
-			}
-			if ui.Button(c, "结束").Width(104).Clicked() {
-				a.endFocus()
-			}
-		case PhaseBreak:
-			if ui.Button(c, "结束").Width(104).Clicked() {
+			case PhaseBreak:
 				a.endBreak()
-			}
-		default:
-			if ui.PrimaryButton(c, "开始").Width(140).Clicked() {
+			default:
 				a.startFocus()
 			}
 		}
+		if snap.Phase == PhaseFocus || snap.Phase == PhasePaused {
+			end := ui.Button(c, "结束").Width(118).Height(44).Radius(12).
+				Transition(ui.ElementTransition{Duration: 180 * time.Millisecond,
+					Enter: &ui.Motion{X: -6}, Exit: &ui.Motion{Y: 6}})
+			keyboardFocus = keyboardFocus || end.FocusVisible()
+			buttonFeedback(end)
+			if end.Clicked() {
+				a.endFocus()
+			}
+		}
 	})
+	revealControls(zone, keyboardFocus)
+}
+
+// Move the painted button without changing its slot or postponing the action.
+func buttonFeedback(button *ui.Element) {
+	target := float32(0)
+	if button.Pressed() {
+		target = 2
+	}
+	button.Top(button.Animate("press", target, 90*time.Millisecond))
 }
 
 // phaseLabel names the phase above the ring.
