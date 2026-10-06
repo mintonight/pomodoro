@@ -1,10 +1,15 @@
 name: Release
 
-# Push a tag such as v0.1.0 to build every platform and attach the packages
+# Push a tag such as v0.3.0 to build every platform and attach the packages
 # to a GitHub Release. The tag must match "version" in mygo.json.
+#
+# The workflow is also dispatched, on the tag, by the tag job of ci.yml:
+# a tag pushed with the workflow's own token starts no workflow, so after a
+# push to main that job makes the tag and asks for this release by hand.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write # the releases, and the uploads to them
@@ -78,8 +83,13 @@ jobs:
       - name: Test
         run: go test ./...
 
-      # No frontend, so no Bun: go.mod pins the CLI as a tool.
+      # No frontend, so no Bun: go.mod pins the CLI as a tool. The signing
+      # key makes mygo build sign the update archives and write the
+      # manifests the installed apps check; without it the packages still
+      # build, they just carry no update.
       - name: Build
+        env:
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
         run: go tool mygo build -platform "${{ matrix.platform }}"
 
       # The packages of the targets, into one flat directory, with the

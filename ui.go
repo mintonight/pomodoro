@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"path/filepath"
 	"time"
 
 	"github.com/egoist/mygo/plugins/glass"
@@ -29,8 +30,17 @@ func (a *App) view(c *ui.Context) {
 	}
 
 	t := c.Theme()
+	// The theme's own Surface is a gray tuned for solid windows; over the
+	// frosted backdrop the panels read as dirty. In the light appearance
+	// the controls show pure white instead.
+	if !t.Dark {
+		t.Surface = ui.Hex("#ffffff")
+	}
 	ui.Column(c).Fill().Background(t.Background).Draw(func(p *ui.Painter, r ui.Rect) {
-		paintWindowBackground(p, r, t.Dark)
+		a.mu.Lock()
+		custom, path := a.settings.CustomWallpaper, a.settings.WallpaperPath
+		a.mu.Unlock()
+		paintWindowBackground(p, r, t.Dark, custom, path)
 	}).Children(func() {
 		a.nav(c)
 		switch a.page {
@@ -262,21 +272,26 @@ func arc(cx, cy, radius, from, to float32) *ui.Path {
 // #region the stats page
 
 func (a *App) statsPage(c *ui.Context) {
+	t := c.Theme()
 	year, month := a.shownMonth()
 	stats := a.dayStats()
 
 	ui.Scroll(c).Grow(1).Padding(20).Gap(20).Children(func() {
 		// Which month the heatmap shows.
 		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-			if ui.Button(c, "").Label("上个月").Tooltip("上个月").Width(32).Children(func() {
-				ui.Icon(c, chevronLeft)
-			}).Clicked() {
+			prevBtn := ui.ButtonBase(c).Label("上个月").Tooltip("上个月").Size(32, 32).Radius(16).
+				Material(glass.Glass{Interactive: true}).Children(func() {
+				ui.Icon(c, chevronLeft).Size(16, 16).TextColor(t.Text)
+			})
+			if prevBtn.Clicked() {
 				a.shiftMonth(-1)
 			}
 			ui.Textf(c, "%d 年 %d 月", year, month).FontSize(16).Bold().Grow(1).TextAlign(ui.Center)
-			if ui.Button(c, "").Label("下个月").Tooltip("下个月").Width(32).Children(func() {
-				ui.Icon(c, chevronRight)
-			}).Clicked() {
+			nextBtn := ui.ButtonBase(c).Label("下个月").Tooltip("下个月").Size(32, 32).Radius(16).
+				Material(glass.Glass{Interactive: true}).Children(func() {
+				ui.Icon(c, chevronRight).Size(16, 16).TextColor(t.Text)
+			})
+			if nextBtn.Clicked() {
 				a.shiftMonth(1)
 			}
 		})
@@ -351,6 +366,9 @@ func (a *App) heatmap(c *ui.Context, stats map[string]storage.DayStat, year int,
 
 				box := ui.Box(c).Key(cell).Height(30).Radius(6).Center()
 				box.Background(bucketColor(stat.Minutes, t))
+				if stat.Minutes <= 0 && !t.Dark {
+					box.Border(1, t.Border)
+				}
 				if stat.Minutes > 0 {
 					box.TextColor(ui.RGB(255, 255, 255))
 				} else {
@@ -375,7 +393,10 @@ func (a *App) heatmap(c *ui.Context, stats map[string]storage.DayStat, year int,
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "少").FontSize(11).TextColor(t.TextMuted)
 			for _, m := range []float64{0, 15, 45, 90, 150} {
-				ui.Box(c).Size(14, 14).Radius(4).Background(bucketColor(m, t))
+				swatch := ui.Box(c).Size(14, 14).Radius(4).Background(bucketColor(m, t))
+				if m <= 0 && !t.Dark {
+					swatch.Border(1, t.Border)
+				}
 			}
 			ui.Text(c, "多").FontSize(11).TextColor(t.TextMuted)
 			ui.Spacer(c)
@@ -438,7 +459,7 @@ func bucketColor(minutes float64, t *ui.Theme) ui.Color {
 		level0, level1 = ui.Hex("#3a3a40"), ui.Hex("#2d5a3d")
 		level2, level3, level4 = ui.Hex("#2f8a4e"), ui.Hex("#35a85a"), ui.Hex("#3fca6e")
 	} else {
-		level0, level1 = ui.Hex("#ebedf0"), ui.Hex("#9be9a8")
+		level0, level1 = ui.Hex("#ffffff"), ui.Hex("#9be9a8")
 		level2, level3, level4 = ui.Hex("#40c463"), ui.Hex("#30a14e"), ui.Hex("#216e39")
 	}
 	switch {
@@ -496,6 +517,10 @@ func (a *App) settingsPage(c *ui.Context) {
 
 		ui.Divider(c)
 
+		a.backgroundSection(c)
+
+		ui.Divider(c)
+
 		ui.Column(c).Gap(6).Children(func() {
 			ui.Text(c, "系统").FontSize(13).Bold().TextColor(t.TextMuted)
 			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
@@ -508,6 +533,10 @@ func (a *App) settingsPage(c *ui.Context) {
 				}
 			})
 		})
+
+		ui.Divider(c)
+
+		a.updatesSection(c)
 
 		ui.Divider(c)
 
@@ -525,6 +554,129 @@ func (a *App) settingsPage(c *ui.Context) {
 			ui.Textf(c, "共 %d 个番茄。数据保存在本机。", a.totalSessions()).FontSize(12).TextColor(t.TextMuted)
 		})
 	})
+}
+
+// backgroundSection is the 背景 block of the settings page: the switch
+// of the custom wallpaper, the image it shows with a way to pick another,
+// and the way back to the default backdrop.
+func (a *App) backgroundSection(c *ui.Context) {
+	t := c.Theme()
+	custom := a.wallpaperSetting()
+
+	ui.Column(c).Gap(10).Children(func() {
+		ui.Text(c, "背景").FontSize(13).Bold().TextColor(t.TextMuted)
+
+		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Grow(1).Gap(2).Children(func() {
+				ui.Text(c, "自定义壁纸")
+				ui.Text(c, "用一张图片代替默认的桌面壁纸背景").FontSize(12).TextColor(t.TextMuted)
+			})
+			if ui.Switch(c, &a.wallpaperField).Label("自定义壁纸").Changed() {
+				a.setCustomWallpaper(a.wallpaperField)
+			}
+		})
+
+		if custom {
+			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+				ui.Column(c).Grow(1).Gap(2).Children(func() {
+					name := a.wallpaperPathSetting()
+					if name == "" {
+						name = "未选择图片"
+					} else {
+						name = filepath.Base(name)
+					}
+					ui.Text(c, name).FontSize(12).TextColor(t.TextMuted)
+				})
+				if ui.Button(c, "选择图片").Clicked() {
+					a.pickWallpaper()
+				}
+				if a.wallpaperPathSetting() != "" && ui.Button(c, "清除").Clicked() {
+					a.clearWallpaper()
+				}
+			})
+		}
+	})
+}
+
+// updatesSection is the 更新 block of the settings page: the current
+// version, the state of the updater with its buttons, and the switch of
+// the automatic check.
+func (a *App) updatesSection(c *ui.Context) {
+	t := c.Theme()
+	ui.Column(c).Gap(10).Children(func() {
+		ui.Text(c, "更新").FontSize(13).Bold().TextColor(t.TextMuted)
+
+		state := a.updateStatus()
+
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Grow(1).Gap(2).Children(func() {
+				line := "当前版本 " + a.version()
+				switch state.Status {
+				case "checking":
+					line = "正在检查更新…"
+				case "downloading":
+					line = fmt.Sprintf("正在下载更新 %s（%.0f%%）", state.Version, state.Progress*100)
+				case "ready":
+					line = fmt.Sprintf("已安装 %s，重启后生效", state.Version)
+				case "error":
+					line = state.Message
+				case "idle":
+					if state.New {
+						line = fmt.Sprintf("发现新版本 %s", state.Version)
+					}
+				}
+				ui.Text(c, line)
+				if hint := a.updateHint(state); hint != "" {
+					ui.Text(c, hint).FontSize(12).TextColor(t.TextMuted)
+				}
+				if state.Status == "downloading" {
+					ui.Meter(c, state.Progress, 0, 1, nil).Label("下载进度").Grow(1)
+				}
+			})
+			switch state.Status {
+			case "checking":
+				if ui.Button(c, "取消").Clicked() {
+					a.cancelUpdate()
+				}
+			case "downloading":
+				if ui.Button(c, "取消").Clicked() {
+					a.cancelUpdate()
+				}
+			case "ready":
+				if ui.PrimaryButton(c, "重启更新").Clicked() {
+					a.relaunchUpdate()
+				}
+			default:
+				if ui.PrimaryButton(c, "检查更新").Clicked() {
+					go a.checkForUpdates(true)
+				}
+				if state.New && ui.Button(c, "立即安装").Clicked() {
+					a.installUpdate()
+				}
+			}
+		})
+
+		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Grow(1).Gap(2).Children(func() {
+				ui.Text(c, "自动检查更新")
+				ui.Text(c, "启动时联网检查新版本").FontSize(12).TextColor(t.TextMuted)
+			})
+			if ui.Switch(c, &a.updateField).Label("自动检查更新").Changed() {
+				a.setUpdate(a.updateField)
+			}
+		})
+	})
+}
+
+// updateHint is the second line under the state, when it has one.
+func (a *App) updateHint(s UpdateState) string {
+	switch s.Status {
+	case "idle":
+		if s.New {
+			return "安装会先下载更新，完成后提示重启。"
+		}
+	}
+	return ""
 }
 
 // themeLabel and themeValue translate between the stored value and the

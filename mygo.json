@@ -1,8 +1,12 @@
 {
   "name": "pomodoro",
   "identifier": "dev.zkbot.pomodoro",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "out": "build",
+  "updates": {
+    "publicKey": "iAFlj2ZmljbG0FAVgig7Ng10OTejxJYLzLlDIuu0cYo=",
+    "github": "mintonight/pomodoro"
+  },
   "linux": {
     "maintainer": "mintonight <mintonight@users.noreply.github.com>",
     "comment": "极简桌面番茄钟：专注计时、统计热力图、系统托盘",

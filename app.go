@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +23,12 @@ import (
 //
 //go:embed resources/tray.png
 var trayIconPNG []byte
+
+// appIconPNG is the application icon, shown in the title bar and on the
+// taskbar.
+//
+//go:embed resources/icon.png
+var appIconPNG []byte
 
 // App is the whole application: the timer, the settings, the window and the
 // tray. The timer and the settings are guarded by mu, as the clock runs on a
@@ -49,10 +59,12 @@ type App struct {
 	// The settings page's controls, which hold what the user typed until it
 	// is stored. Syncing them out of the settings every frame would fight
 	// with the typing.
-	focusField  float64
-	breakField  float64
-	themeField  string
-	launchField bool
+	focusField     float64
+	breakField     float64
+	themeField     string
+	launchField    bool
+	updateField    bool
+	wallpaperField bool
 
 	// A message the view shows as a toast once, set from a goroutine.
 	pending string
@@ -67,10 +79,40 @@ type App struct {
 	quitting    atomic.Bool
 	lastTrayTip string
 
+	// The updater and its state, for the settings page. updateMu guards the
+	// state the clock and the update goroutine write; updateCheck holds the
+	// check in progress. updateNow is what a running check reads, and is
+	// what the tests replace: the real one wraps mygo.Updater, which the
+	// tests cannot touch, as it does nothing without an update feed.
+	updateMu      sync.Mutex
+	updateState   UpdateState
+	updateCheck   *updateCheck
+	updateNow     func(ctx context.Context) (*mygo.Update, error)
+	updateInstall func(ctx context.Context, progress func(done, total int64)) error
+	updateLaunch  func()
+
 	// quit tells the clock goroutine to stop, and clockDone is closed when
 	// it has: the database is only closed after that.
 	quit      chan struct{}
 	clockDone chan struct{}
+}
+
+// UpdateState is what the settings page shows of the updater.
+type UpdateState struct {
+	// Status, one of "idle", "checking", "downloading", "ready", "error".
+	Status string
+	// New is whether a newer version was found.
+	New bool
+	// Version found, and the error message of a failed check or install.
+	Version, Message string
+	// Progress of a download, from 0 to 1.
+	Progress float64
+}
+
+// updateCheck is the check or download in progress.
+type updateCheck struct {
+	// cancel stops a download; a bare check lets it finish.
+	cancel context.CancelFunc
 }
 
 // The pages of the app.
@@ -90,6 +132,11 @@ func newApp(store *storage.Storage, settings storage.Settings) *App {
 		quit:       make(chan struct{}),
 		clockDone:  make(chan struct{}),
 	}
+	app.updateNow = mygo.Updater.Check
+	app.updateInstall = app.installPending
+	app.updateLaunch = func() { mygo.App.Relaunch() }
+	app.updateState = UpdateState{Status: "idle"}
+	app.wallpaperField = settings.CustomWallpaper
 	app.syncSettingFields(settings)
 	return app
 }
@@ -101,6 +148,7 @@ func (a *App) syncSettingFields(v storage.Settings) {
 	a.breakField = v.BreakMinutes
 	a.themeField = themeLabel(v.Theme)
 	a.launchField = v.LaunchAtStartup
+	a.updateField = v.AutoUpdate
 }
 
 // #region the timer
@@ -253,6 +301,86 @@ func (a *App) launchSetting() bool {
 	return a.settings.LaunchAtStartup
 }
 
+// version is the version this build is, as mygo.json's or the package's.
+func (a *App) version() string {
+	if v := mygo.App.Version(); v != "" {
+		return v
+	}
+	return "开发版"
+}
+
+// setUpdate stores whether the app checks for updates at startup. Turning
+// it off also cancels nothing: a check in progress simply finishes.
+func (a *App) setUpdate(v bool) {
+	a.updateSettings(func(s *storage.Settings) { s.AutoUpdate = v })
+}
+
+// wallpaperSetting reports whether the custom wallpaper is on.
+func (a *App) wallpaperSetting() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.settings.CustomWallpaper
+}
+
+// wallpaperPath returns the image the custom wallpaper shows.
+func (a *App) wallpaperPathSetting() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.settings.WallpaperPath
+}
+
+// setCustomWallpaper stores whether the custom wallpaper shows.
+func (a *App) setCustomWallpaper(v bool) {
+	a.wallpaperField = v
+	a.updateSettings(func(s *storage.Settings) { s.CustomWallpaper = v })
+	a.refresh()
+}
+
+// pickWallpaper asks for an image and makes it the custom wallpaper.
+func (a *App) pickWallpaper() {
+	if !a.desktop {
+		return
+	}
+	go func() {
+		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+			Parent: a.win,
+			Title:  "选择壁纸图片",
+			Filters: []mygo.FileFilter{{Name: "图片", Extensions: []string{
+				"png", "jpg", "jpeg", "gif", "webp", "bmp",
+			}}},
+		})
+		if err != nil {
+			a.setMessage("选择图片失败：" + err.Error())
+			return
+		}
+		if len(paths) == 0 {
+			return
+		}
+		// Reading it now tells the user of an unreadable image at once.
+		if _, err := os.ReadFile(paths[0]); err != nil {
+			a.setMessage("图片无法读取：" + err.Error())
+			return
+		}
+		a.mu.Lock()
+		a.settings.WallpaperPath = paths[0]
+		a.settings.CustomWallpaper = true
+		a.wallpaperField = true
+		saved := a.settings
+		a.mu.Unlock()
+		if err := a.store.SaveSettings(saved); err != nil {
+			log.Println("pomodoro: saving the settings:", err)
+		}
+		a.refresh()
+	}()
+}
+
+// clearWallpaper forgets the custom image; the switch stays as it is, so
+// what is left is the default backdrop.
+func (a *App) clearWallpaper() {
+	a.updateSettings(func(s *storage.Settings) { s.WallpaperPath = "" })
+	a.refresh()
+}
+
 // setFocusMinutes stores the focus length. A running round keeps its own
 // length; the next one uses this.
 func (a *App) setFocusMinutes(v float64) {
@@ -386,6 +514,12 @@ func (a *App) start() {
 		a.win.Hide()
 	})
 
+	// The title bar and the taskbar carry the app icon even when the
+	// executable embeds no icon resource, as a `go run` build does.
+	if err := a.win.SetIcon(appIconPNG); err != nil {
+		log.Println("pomodoro: setting the window icon:", err)
+	}
+
 	a.setupTray()
 
 	// The app lives in the tray: it never quits by itself when its window
@@ -397,7 +531,177 @@ func (a *App) start() {
 
 	a.applyTheme()
 	go a.clockLoop()
+	if a.settings.AutoUpdate {
+		go a.checkForUpdates(false)
+	}
 }
+
+// #region the updater
+
+// updateStatus returns what the settings page shows of the updater.
+func (a *App) updateStatus() UpdateState {
+	a.updateMu.Lock()
+	defer a.updateMu.Unlock()
+	return a.updateState
+}
+
+// setUpdateState stores one change of the updater's state and redraws.
+func (a *App) setUpdateState(f func(*UpdateState)) {
+	a.updateMu.Lock()
+	f(&a.updateState)
+	a.updateMu.Unlock()
+	a.invalidate()
+}
+
+// invalidate redraws the window. The tests run without one.
+func (a *App) invalidate() {
+	if a.win != nil {
+		a.win.Invalidate()
+	}
+}
+
+// checkForUpdates looks for a newer version and records what it found,
+// in the calling goroutine; go checkForUpdates to run it in one. When
+// user is false it is the quiet check at startup: it never reports being
+// up to date, and says nothing when it cannot reach the feed.
+func (a *App) checkForUpdates(user bool) {
+	a.updateMu.Lock()
+	if a.updateCheck != nil {
+		// A check is under way: the user asking again only brings the
+		// window up, which the settings page already shows.
+		a.updateMu.Unlock()
+		return
+	}
+	if !user && (a.updateState.New || !a.settings.AutoUpdate) {
+		// The quiet check neither repeats itself nor runs after the user
+		// turned the automatic check off.
+		a.updateMu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	previous := a.updateState
+	a.updateCheck = &updateCheck{cancel: cancel}
+	a.updateState = UpdateState{Status: "checking"}
+	a.updateMu.Unlock()
+	a.invalidate()
+
+	up, err := a.updateNow(ctx)
+
+	a.updateMu.Lock()
+	a.updateCheck = nil
+	switch {
+	case err != nil && ctx.Err() != nil:
+		// The user canceled: back to where the page was.
+		a.updateState = previous
+	case err != nil && user:
+		a.updateState = UpdateState{Status: "error", Message: updateMessage(err)}
+	case err != nil, up == nil:
+		// A quiet check that failed or found nothing stays silent; a
+		// manual one says the app is current.
+		if user {
+			a.updateState = UpdateState{Status: "idle", Message: "已是最新版本"}
+		} else {
+			a.updateState = UpdateState{Status: "idle"}
+		}
+	default:
+		a.updateState = UpdateState{Status: "idle", New: true, Version: up.Version}
+	}
+	a.updateMu.Unlock()
+	cancel()
+	a.invalidate()
+}
+
+// installUpdate downloads the update that was found and installs it in
+// place of the running app, in a goroutine.
+func (a *App) installUpdate() {
+	a.updateMu.Lock()
+	state := a.updateState
+	chk := a.updateCheck
+	a.updateMu.Unlock()
+	if !state.New || chk != nil {
+		return
+	}
+
+	// The check is registered before the goroutine starts, so a cancel
+	// clicked at once reaches the download.
+	ctx, cancel := context.WithCancel(context.Background())
+	a.updateMu.Lock()
+	a.updateCheck = &updateCheck{cancel: cancel}
+	a.updateState.Status = "downloading"
+	a.updateState.Message = ""
+	a.updateState.Progress = 0
+	a.updateMu.Unlock()
+	a.invalidate()
+
+	go func() {
+		defer cancel()
+		err := a.updateInstall(ctx, func(done, total int64) {
+			if total > 0 {
+				a.setUpdateState(func(s *UpdateState) { s.Progress = float64(done) / float64(total) })
+			}
+		})
+
+		a.updateMu.Lock()
+		a.updateCheck = nil
+		a.updateMu.Unlock()
+
+		if err != nil {
+			if ctx.Err() != nil {
+				// The user canceled: back to the found state.
+				a.setUpdateState(func(s *UpdateState) { s.Status = "idle" })
+			} else {
+				a.setUpdateState(func(s *UpdateState) { s.Status = "error"; s.Message = updateMessage(err) })
+			}
+			return
+		}
+		// The new version runs at the next launch; the app offers to
+		// restart into it now.
+		a.setUpdateState(func(s *UpdateState) { s.Status = "ready" })
+	}()
+}
+
+// installPending installs the newest update the feed offers, through
+// App.updateInstall. Asking the feed again keeps a version pulled from it
+// in the meantime from installing anything but the newest.
+func (a *App) installPending(ctx context.Context, progress func(done, total int64)) error {
+	up, err := a.updateNow(ctx)
+	if err != nil {
+		return err
+	}
+	if up == nil {
+		return errors.New("the update is no longer offered")
+	}
+	return up.Install(ctx, progress)
+}
+
+// cancelUpdate stops a download in progress.
+func (a *App) cancelUpdate() {
+	a.updateMu.Lock()
+	chk := a.updateCheck
+	a.updateMu.Unlock()
+	if chk != nil {
+		chk.cancel()
+	}
+}
+
+// relaunchUpdate restarts the app into the installed update.
+func (a *App) relaunchUpdate() { a.updateLaunch() }
+
+// updateMessage makes an updater error readable.
+func updateMessage(err error) string {
+	if errors.Is(err, mygo.ErrUpdatesDisabled) {
+		return "此版本不支持自动更新"
+	}
+	msg := err.Error()
+	// The wrapped errors of the updater name the feed and the request; keep
+	// the last line, which is the cause.
+	if i := strings.LastIndex(msg, ": "); i > 0 {
+		msg = msg[i+2:]
+	}
+	return msg
+}
+
+// #endregion
 
 // setupTray puts the icon in the menu bar or the notification area. Without
 // the library a Linux desktop needs, it reports the problem and goes on: the
@@ -417,6 +721,9 @@ func (a *App) setupTray() {
 		return
 	}
 	a.tray = tray
+	// A left click opens the window: Windows shows the menu on a right
+	// click only, so without this a left click does nothing.
+	tray.OnClick(func() { a.showWindow() })
 	a.updateTray(a.snapshot())
 }
 

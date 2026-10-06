@@ -12,7 +12,7 @@ import (
 
 // Draw the app icon: a pomodoro whose stem fans out into five sprouts in
 // the five colors of mygo.egoist.dev's bang marks (oklch from the site CSS,
-// converted to sRGB), echoing the existing tray icon's flat look.
+// converted to sRGB). The tray icon is the same drawing at 64x64.
 
 // goColor is the straight-alpha RGBA a Go color paints with.
 func goColor(hex string, alpha uint8) color.RGBA {
@@ -76,8 +76,15 @@ func main() {
 		drawLeaf(img, l.angle, l.len, l.wide, goColor(bangColors[i], 255))
 	}
 
-	out := filepath.Join("resources", "icon.png")
-	f, err := os.Create(out)
+	writePNG(img, filepath.Join("resources", "icon.png"))
+	// The tray icon is the same drawing downscaled, so the tray and the
+	// taskbar show one mark.
+	writePNG(downscale(img, 64), filepath.Join("resources", "tray.png"))
+}
+
+// writePNG encodes img to path.
+func writePNG(img image.Image, path string) {
+	f, err := os.Create(path)
 	if err != nil {
 		panic(err)
 	}
@@ -85,6 +92,28 @@ func main() {
 	if err := png.Encode(f, img); err != nil {
 		panic(err)
 	}
+}
+
+// downscale averages whole blocks of the source into each pixel of a
+// size x size image, which needs the source side to divide evenly. The
+// pixels are alpha-premultiplied, so edges shrink without dark halos.
+func downscale(src *image.RGBA, size int) *image.RGBA {
+	block := src.Bounds().Dx() / size
+	out := image.NewRGBA(image.Rect(0, 0, size, size))
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			var r, g, b, a, n int
+			for dy := 0; dy < block; dy++ {
+				for dx := 0; dx < block; dx++ {
+					c := src.RGBAAt(x*block+dx, y*block+dy)
+					r, g, b, a = r+int(c.R), g+int(c.G), b+int(c.B), a+int(c.A)
+					n++
+				}
+			}
+			out.SetRGBA(x, y, color.RGBA{uint8(r / n), uint8(g / n), uint8(b / n), uint8(a / n)})
+		}
+	}
+	return out
 }
 
 // drawLeaf paints one sprout: a curved spine from the root toward angle,
