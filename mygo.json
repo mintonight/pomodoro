@@ -1,7 +1,7 @@
 {
   "name": "pomodoro",
   "identifier": "dev.zkbot.pomodoro",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "out": "build",
   "updates": {
     "publicKey": "iAFlj2ZmljbG0FAVgig7Ng10OTejxJYLzLlDIuu0cYo=",
