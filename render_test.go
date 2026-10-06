@@ -35,7 +35,12 @@ func TestRenderPages(t *testing.T) {
 		{"idle", pageTimer, nil},
 		{"focus", pageTimer, func() { app.startFocus(); *now = now.Add(7 * time.Minute) }},
 		{"paused", pageTimer, func() { app.pause() }},
-		{"break", pageTimer, func() { app.endFocus(); *now = now.Add(30 * time.Minute); app.advance() }},
+		{"break", pageTimer, func() {
+			app.endFocus()
+			app.startFocus()
+			*now = now.Add(26 * time.Minute)
+			app.advance()
+		}},
 		{"stats", pageStats, nil},
 		{"settings", pageSettings, nil},
 	}
