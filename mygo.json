@@ -1,0 +1,17 @@
+{
+  "name": "pomodoro",
+  "identifier": "dev.zkbot.pomodoro",
+  "version": "0.1.0",
+  "out": "build",
+  "linux": {
+    "maintainer": "mintonight <mintonight@users.noreply.github.com>",
+    "comment": "极简桌面番茄钟：专注计时、统计热力图、系统托盘",
+    "categories": [
+      "Utility"
+    ],
+    "command": "pomodoro",
+    "depends": [
+      "libayatana-appindicator3-1"
+    ]
+  }
+}

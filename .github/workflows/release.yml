@@ -1,0 +1,97 @@
+name: Release
+
+# Push a tag such as v0.1.0 to build every platform and attach the packages
+# to a GitHub Release. The tag must match "version" in mygo.json.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # the release, and the uploads to it
+
+jobs:
+  # Checks the tag against mygo.json before anything is built: a tag that
+  # disagrees would publish the packages under another version.
+  check:
+    name: Check the version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag against mygo.json
+        run: |
+          want="v$(jq -r .version mygo.json)"
+          if [ "$GITHUB_REF_NAME" != "$want" ]; then
+            echo "the tag $GITHUB_REF_NAME does not match mygo.json ($want)" >&2
+            exit 1
+          fi
+
+  build:
+    name: ${{ matrix.name }}
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The macOS app needs a macOS runner: the disk image does.
+          - { name: macOS, os: macos-latest, platform: "darwin/universal" }
+          # MyGo needs no cgo, so Linux runners also build the Windows apps.
+          - { name: Windows, os: ubuntu-latest, platform: "windows/amd64,windows/arm64" }
+          - { name: Linux, os: ubuntu-latest, platform: "linux/amd64,linux/arm64" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # mygo build makes the Windows installers with NSIS.
+      - name: Install NSIS
+        if: matrix.name == 'Windows'
+        run: sudo apt-get update && sudo apt-get install -y nsis
+
+      - name: Test
+        run: go test ./...
+
+      # No frontend, so no Bun: go.mod pins the CLI as a tool.
+      - name: Build
+        run: go tool mygo build -platform "${{ matrix.platform }}"
+
+      - name: Upload the packages as artifacts of the run
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            build/*/*.dmg
+            build/*/*Setup*.exe
+            build/*/*.deb
+            build/*/*.tar.gz
+            build/*/install.sh
+
+  release:
+    name: Publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # Every platform's packages, into one directory, flat.
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List what will be published
+        run: find dist -type f | sort
+
+      - name: Create the release with the packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag \
+            dist/*
