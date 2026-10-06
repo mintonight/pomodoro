@@ -11,7 +11,6 @@
 
 ## 为什么是原生 UI
 
-大多数桌面番茄钟是 Electron 或 webview 套壳：几百 MB 的安装包，只为画一个圆环。
 Pomodoro 用 [MyGo](https://mygo.egoist.dev/) 的 native UI 直接在 GPU 上绘制界面——
 没有网页、没有 webview，整个应用是一个几 MB 的 Go 可执行文件，启动即用。
 
@@ -87,7 +86,7 @@ pomodoro/
 
 ## 开发
 
-需要 Go 1.27 或更新版本。原生 UI 不需要 Bun，也不需要 WebKitGTK；
+需要 Go 1.27 或更新版本。
 Linux 上的托盘图标需要 `libayatana-appindicator3`。
 
 ```sh
@@ -96,29 +95,3 @@ go tool mygo dev       # 开发模式，改动自动重载
 go tool mygo build     # 打包成可安装的应用
 ```
 
-界面测试不需要窗口：`ui.NewTester` 与 `ui.Render` 会在内存里渲染每一帧，
-所以 `go test ./...` 在没有图形环境的机器上也能通过。
-`UPDATE_SHOTS=1 go test -run TestRenderPages .` 会把每一页的截图写到 `/tmp/shot-*.png`。
-
-## 发布
-
-两个 GitHub Actions 工作流：
-
-- **CI**（`.github/workflows/ci.yml`）：每次 push 和 PR 跑测试（`-race`）、`go vet`、
-  `gofmt` 检查，并交叉编译六个目标（linux / windows / darwin × amd64 / arm64）验证能编过。
-- **Release**（`.github/workflows/release.yml`）：推一个 `v*` 的 tag 触发。先校验 tag 和
-  `mygo.json` 里的 `version` 一致，建一个 draft release，然后三个 runner 并行构建：
-  macOS 出 `.dmg`，Linux 出 `.deb` / `.tar.gz` / `install.sh`，Windows 出安装器
-  （在 Linux runner 上用 NSIS 打）。最后把 draft 转正发布。
-
-因为 `mygo build` 给两个架构的 Windows 安装器取的是同一个名字，磁盘镜像也只按应用名命名，
-工作流会把产物收进一个扁平目录，给需要的文件加上平台后缀，避免同名资产互相覆盖。
-
-发新版本：
-
-```sh
-# 改 mygo.json 里的 version，提交，然后
-# 注意：tag 必须和 version 完全一致，否则 Release 会在构建前就失败
-git tag -a v0.2.0 -m "pomodoro v0.2.0"
-git push origin v0.2.0
-```
