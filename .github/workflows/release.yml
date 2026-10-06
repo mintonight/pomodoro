@@ -5,9 +5,10 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
-  contents: write # the release, and the uploads to it
+  contents: write # the releases, and the uploads to them
 
 jobs:
   # Checks the tag against mygo.json before anything is built: a tag that
@@ -16,7 +17,7 @@ jobs:
     name: Check the version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check the tag against mygo.json
         run: |
@@ -26,23 +27,46 @@ jobs:
             exit 1
           fi
 
+  # The draft release exists before the builds start, so that every platform
+  # uploads to the same one. Running the workflow again keeps it and replaces
+  # its files. Review it, then publish it, or let the publish job below.
+  draft:
+    name: Create the draft release
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "the release $GITHUB_REF_NAME already exists"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft \
+              --verify-tag \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
+
   build:
     name: ${{ matrix.name }}
-    needs: check
+    needs: draft
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # The macOS app needs a macOS runner: the disk image does.
+          # The macOS app needs a macOS runner: making the disk image does.
           - { name: macOS, os: macos-latest, platform: "darwin/universal" }
           # MyGo needs no cgo, so Linux runners also build the Windows apps.
           - { name: Windows, os: ubuntu-latest, platform: "windows/amd64,windows/arm64" }
           - { name: Linux, os: ubuntu-latest, platform: "linux/amd64,linux/arm64" }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -59,39 +83,64 @@ jobs:
       - name: Build
         run: go tool mygo build -platform "${{ matrix.platform }}"
 
-      - name: Upload the packages as artifacts of the run
-        uses: actions/upload-artifact@v4
+      # The names the upload and the release's download links use. An array
+      # keeps the paths with spaces, as "<Name> Setup <version>.exe" has.
+      - name: Collect the packages
+        id: packages
+        run: |
+          shopt -s nullglob
+          files=(
+            build/*/*.dmg
+            build/*/*" Setup "*.exe
+            build/*/*.deb
+            build/*/*.tar.gz
+            build/*/install.sh
+          )
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "the build produced no packages" >&2
+            exit 1
+          fi
+          printf 'found %d packages:\n' "${#files[@]}"
+          printf '  %s\n' "${files[@]}"
+          printf 'files=%s\n' "$(printf '%s\n' "${files[@]}" | paste -sd, -)" >> "$GITHUB_OUTPUT"
+
+      # Uploaded straight to the release, so its assets are what people
+      # download. --clobber lets a re-run replace them; the two Linux targets
+      # produce the same install.sh, which is fine.
+      - name: Upload to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          IFS=',' read -ra files <<< "${{ steps.packages.outputs.files }}"
+          gh release upload "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber \
+            "${files[@]}"
+
+      # Also kept as artifacts of the run, to inspect without downloading
+      # from the release.
+      - name: Keep the packages as artifacts of the run
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}
           if-no-files-found: error
           path: |
             build/*/*.dmg
-            build/*/*Setup*.exe
+            build/*/* Setup *.exe
             build/*/*.deb
             build/*/*.tar.gz
             build/*/install.sh
 
-  release:
+  publish:
     name: Publish the release
     needs: build
     runs-on: ubuntu-latest
     steps:
-      # Every platform's packages, into one directory, flat.
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: List what will be published
-        run: find dist -type f | sort
-
-      - name: Create the release with the packages
+      - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          gh release edit "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes \
-            --verify-tag \
-            dist/*
+            --draft=false
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
