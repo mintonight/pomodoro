@@ -3,6 +3,24 @@
 一个用 [MyGo](https://mygo.egoist.dev/) 写的最小桌面番茄钟。界面由 MyGo 自己用
 GPU 绘制（native UI），没有网页、没有 webview，整个应用是一个几 MB 的 Go 可执行文件。
 
+## 下载安装
+
+从 [Releases](https://github.com/mintonight/pomodoro/releases/latest) 下载对应平台的文件：
+
+| 平台 | 文件 |
+|---|---|
+| **Linux** | `install.sh` 一行装好：`curl -fsSL https://github.com/mintonight/pomodoro/releases/latest/download/install.sh \| sh` |
+| | 或下 `.deb`：`sudo apt install ./pomodoro_*_amd64.deb` |
+| | 或下 `.tar.gz` 解压后直接运行里面的 `pomodoro` |
+| **Windows** | `pomodoro.Setup.<版本>-windows-amd64.exe`（或 `arm64`），双击安装 |
+| **macOS** | `pomodoro.<版本>-darwin-universal.dmg`，打开后把应用拖进 Applications |
+
+Linux 上的托盘图标需要 `libayatana-appindicator3`；`.deb` 已经把它写进依赖，
+`install.sh` 没有 root 权限所以不会自动装。
+
+> 这些包都没有代码签名：macOS 的 Gatekeeper 和 Windows 的 SmartScreen 会警告，
+> 首次打开需要在系统设置里放行。自己编译则不会有这个问题。
+
 ## 功能
 
 - **番茄计时**：默认专注 25 分钟、休息 5 分钟，都可以自定义。
@@ -63,3 +81,26 @@ go tool mygo build     # 打包成可安装的应用
 界面测试不需要窗口：`ui.NewTester` 与 `ui.Render` 会在内存里渲染每一帧，
 所以 `go test ./...` 在没有图形环境的机器上也能通过。
 `UPDATE_SHOTS=1 go test -run TestRenderPages .` 会把每一页的截图写到 `/tmp/shot-*.png`。
+
+## 发布
+
+两个 GitHub Actions 工作流：
+
+- **CI**（`.github/workflows/ci.yml`）：每次 push 和 PR 跑测试（`-race`）、`go vet`、
+  `gofmt` 检查，并交叉编译六个目标（linux / windows / darwin × amd64 / arm64）验证能编过。
+- **Release**（`.github/workflows/release.yml`）：推一个 `v*` 的 tag 触发。先校验 tag 和
+  `mygo.json` 里的 `version` 一致，建一个 draft release，然后三个 runner 并行构建：
+  macOS 出 `.dmg`，Linux 出 `.deb` / `.tar.gz` / `install.sh`，Windows 出安装器
+  （在 Linux runner 上用 NSIS 打）。最后把 draft 转正发布。
+
+因为 `mygo build` 给两个架构的 Windows 安装器取的是同一个名字，磁盘镜像也只按应用名命名，
+工作流会把产物收进一个扁平目录，给需要的文件加上平台后缀，避免同名资产互相覆盖。
+
+发新版本：
+
+```sh
+# 改 mygo.json 里的 version，提交，然后
+# 注意：tag 必须和 version 完全一致，否则 Release 会在构建前就失败
+git tag -a v0.2.0 -m "pomodoro v0.2.0"
+git push origin v0.2.0
+```
