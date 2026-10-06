@@ -113,7 +113,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 		t.Errorf("a fresh database has %+v, want %+v", got, DefaultSettings())
 	}
 
-	want := Settings{FocusMinutes: 50, BreakMinutes: 10, LaunchAtStartup: true, Theme: "dark"}
+	want := Settings{FocusMinutes: 50, BreakMinutes: 10, LaunchAtStartup: true, AutoUpdate: true, CustomWallpaper: true, WallpaperPath: "C:/pics/wall.png", Theme: "dark"}
 	if err := s.SaveSettings(want); err != nil {
 		t.Fatal(err)
 	}

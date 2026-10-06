@@ -45,7 +45,12 @@ type Settings struct {
 	FocusMinutes    float64 `json:"focus_duration_minutes"`
 	BreakMinutes    float64 `json:"break_duration_minutes"`
 	LaunchAtStartup bool    `json:"launch_at_startup"`
-	Theme           string  `json:"theme"` // "system", "light" or "dark"
+	AutoUpdate      bool    `json:"auto_update"`
+	// CustomWallpaper turns the custom backdrop on; WallpaperPath is the
+	// image it shows. Empty falls back to the gradient.
+	CustomWallpaper bool   `json:"custom_wallpaper"`
+	WallpaperPath   string `json:"wallpaper_path"`
+	Theme           string `json:"theme"` // "system", "light" or "dark"
 }
 
 // DefaultSettings are the settings of a fresh install.
@@ -54,6 +59,7 @@ func DefaultSettings() Settings {
 		FocusMinutes:    25,
 		BreakMinutes:    5,
 		LaunchAtStartup: false,
+		AutoUpdate:      true,
 		Theme:           "system",
 	}
 }
