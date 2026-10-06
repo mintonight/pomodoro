@@ -5,7 +5,6 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
 
 permissions:
   contents: write # the releases, and the uploads to them
@@ -27,9 +26,9 @@ jobs:
             exit 1
           fi
 
-  # The draft release exists before the builds start, so that every platform
-  # uploads to the same one. Running the workflow again keeps it and replaces
-  # its files. Review it, then publish it, or let the publish job below.
+  # The draft exists before the builds start, so that every platform uploads
+  # to the same release. Running the workflow again keeps it and replaces its
+  # files. The publish job at the end makes it public.
   draft:
     name: Create the draft release
     needs: check
@@ -83,53 +82,66 @@ jobs:
       - name: Build
         run: go tool mygo build -platform "${{ matrix.platform }}"
 
-      # The names the upload and the release's download links use. An array
-      # keeps the paths with spaces, as "<Name> Setup <version>.exe" has.
+      # The packages of the targets, into one flat directory, with the
+      # architecture in every name.
+      #
+      # Two things need it. mygo build names a Windows installer "pomodoro
+      # Setup 0.1.0.exe" for either architecture, and a disk image after the
+      # app alone, so the amd64 and arm64 files of one platform would clash
+      # as release assets, and GitHub would keep only the last. And every
+      # Linux target writes the same install.sh, which is the point of it —
+      # it installs what suits the machine it runs on — so one copy is
+      # published.
       - name: Collect the packages
-        id: packages
         run: |
+          set -euo pipefail
           shopt -s nullglob
-          files=(
-            build/*/*.dmg
-            build/*/*" Setup "*.exe
-            build/*/*.deb
-            build/*/*.tar.gz
-            build/*/install.sh
-          )
-          if [ ${#files[@]} -eq 0 ]; then
+          stage=dist
+          rm -rf "$stage"
+          mkdir -p "$stage"
+
+          for dir in build/*/; do
+            target="$(basename "$dir")"
+            for f in "$dir"*.dmg "$dir"*" Setup "*.exe "$dir"*.deb "$dir"*.tar.gz "$dir"install.sh; do
+              # install.sh is not a glob: skip it where the target has none.
+              [ -f "$f" ] || continue
+              name="$(basename "$f")"
+              case "$name" in
+                install.sh) cp -f "$f" "$stage/install.sh" ;;
+                *.exe|*.dmg)
+                  cp -f "$f" "$stage/${name%.*}-${target}.${name##*.}" ;;
+                *) cp -f "$f" "$stage/$name" ;;
+              esac
+            done
+          done
+
+          count="$(find "$stage" -maxdepth 1 -type f | wc -l)"
+          if [ "$count" -eq 0 ]; then
             echo "the build produced no packages" >&2
             exit 1
           fi
-          printf 'found %d packages:\n' "${#files[@]}"
-          printf '  %s\n' "${files[@]}"
-          printf 'files=%s\n' "$(printf '%s\n' "${files[@]}" | paste -sd, -)" >> "$GITHUB_OUTPUT"
+          echo "$count packages:"
+          ls -l "$stage"
 
-      # Uploaded straight to the release, so its assets are what people
-      # download. --clobber lets a re-run replace them; the two Linux targets
-      # produce the same install.sh, which is fine.
+      # Straight to the release, so its assets are what the download links
+      # of a README point at. --clobber lets a re-run replace them.
       - name: Upload to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          IFS=',' read -ra files <<< "${{ steps.packages.outputs.files }}"
+          set -euo pipefail
+          shopt -s nullglob
           gh release upload "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --clobber \
-            "${files[@]}"
+            dist/*
 
-      # Also kept as artifacts of the run, to inspect without downloading
-      # from the release.
       - name: Keep the packages as artifacts of the run
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}
           if-no-files-found: error
-          path: |
-            build/*/*.dmg
-            build/*/* Setup *.exe
-            build/*/*.deb
-            build/*/*.tar.gz
-            build/*/install.sh
+          path: dist/*
 
   publish:
     name: Publish the release
@@ -140,7 +152,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           gh release edit "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --draft=false
-          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
+          echo "published:"
+          gh release view "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json name,tagName,url,assets \
+            --jq '{name, tagName, url, assets: [.assets[] | {name, size}]}'
