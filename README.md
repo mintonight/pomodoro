@@ -1,7 +1,25 @@
-# Pomodoro
+<p align="center">
+  <img src="./assets/readme/hero.svg" width="100%" alt="Pomodoro：一个用 MyGo 写的原生桌面番茄钟，几 MB 的 Go 可执行文件，界面由 GPU 直接绘制；右侧是计时界面，圆环显示 18:00 已完成 28%">
+</p>
 
-一个用 [MyGo](https://mygo.egoist.dev/) 写的最小桌面番茄钟。界面由 MyGo 自己用
-GPU 绘制（native UI），没有网页、没有 webview，整个应用是一个几 MB 的 Go 可执行文件。
+<p align="center">
+  <a href="#下载安装">下载安装</a> ·
+  <a href="#功能">功能</a> ·
+  <a href="#计时怎么算的">计时原理</a> ·
+  <a href="#开发">开发</a>
+</p>
+
+## 为什么是原生 UI
+
+大多数桌面番茄钟是 Electron 或 webview 套壳：几百 MB 的安装包，只为画一个圆环。
+Pomodoro 用 [MyGo](https://mygo.egoist.dev/) 的 native UI 直接在 GPU 上绘制界面——
+没有网页、没有 webview，整个应用是一个几 MB 的 Go 可执行文件，启动即用。
+
+<table>
+<tr>
+<td width="50%" align="center"><img src="./assets/readme/screens.png" width="100%" alt="真实界面截图：左侧是空闲状态 25:00，右侧是专注中 18:00 已完成 28%，壁纸透过玻璃材质成为背景"></td>
+</tr>
+</table>
 
 ## 下载安装
 

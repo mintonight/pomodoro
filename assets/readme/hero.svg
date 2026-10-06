@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="400" viewBox="0 0 1200 400"
+     role="img" aria-labelledby="hero-title hero-desc">
+  <title id="hero-title">Pomodoro — 极简桌面番茄钟</title>
+  <desc id="hero-desc">Pomodoro：一个用 MyGo 写的原生桌面番茄钟。左侧是名称、一句话价值和特性元数据，右侧是应用的计时界面示意：玻璃导航、倒计时圆环和暂停操作。</desc>
+
+  <defs>
+    <!-- The wallpaper-glass backdrop of the real app: lavender to cream,
+         the GoRex gradient the window actually paints. -->
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6e7f6"/>
+      <stop offset="0.38" stop-color="#efe1e6"/>
+      <stop offset="0.70" stop-color="#eee0d3"/>
+      <stop offset="1" stop-color="#ece1bd"/>
+    </linearGradient>
+    <linearGradient id="rose" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0.35" stop-color="#f2d6de" stop-opacity="0"/>
+      <stop offset="1" stop-color="#f2d6de" stop-opacity="0.55"/>
+    </linearGradient>
+    <linearGradient id="tomato" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f27668"/>
+      <stop offset="1" stop-color="#e45852"/>
+    </linearGradient>
+    <!-- One soft highlight the glass modules share. -->
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.92"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.78"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="400" rx="26" fill="url(#bg)"/>
+  <rect width="1200" height="400" rx="26" fill="url(#rose)"/>
+
+  <!-- Title block -->
+  <g id="title-block" transform="translate(64 66)">
+    <text font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="20" font-weight="600" letter-spacing="2.5" fill="#8a7f76">MYGO · NATIVE UI · GPU 绘制</text>
+    <text x="-2" y="86" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="76" font-weight="800" fill="#2d2521" letter-spacing="-1">Pomodoro</text>
+    <text x="0" y="134" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="27" font-weight="600" fill="#5c5148">几 MB 的 Go 可执行文件，</text>
+    <text x="0" y="168" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="27" font-weight="600" fill="#5c5148">界面由 GPU 直接绘制。</text>
+    <text x="0" y="206" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="20" fill="#8a7f76">专注计时 · 统计热力图</text>
+    <text x="0" y="232" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="20" fill="#8a7f76">系统托盘 · 本地 SQLite</text>
+
+    <!-- Metadata row: platform facts a visitor needs first. -->
+    <g transform="translate(0 288)" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="20" font-weight="600" fill="#5c5148">
+      <rect x="0" y="-26" width="150" height="40" rx="12" fill="url(#glass)"/>
+      <text x="75" y="1" text-anchor="middle">Windows</text>
+      <rect x="162" y="-26" width="112" height="40" rx="12" fill="url(#glass)"/>
+      <text x="218" y="1" text-anchor="middle">macOS</text>
+      <rect x="286" y="-26" width="112" height="40" rx="12" fill="url(#glass)"/>
+      <text x="342" y="1" text-anchor="middle">Linux</text>
+    </g>
+  </g>
+
+  <!-- App proof: the timer page the app really shows, drawn flat. -->
+  <g id="app-proof" transform="translate(700 34)">
+    <!-- The window card. -->
+    <rect x="0" y="0" width="436" height="332" rx="22" fill="#ffffff" opacity="0.62"/>
+    <rect x="0" y="0" width="436" height="332" rx="22" fill="none" stroke="#ffffff" stroke-opacity="0.9" stroke-width="2"/>
+
+    <!-- Glass segmented navigation with the selection on 计时. -->
+    <g transform="translate(88 26)">
+      <rect x="0" y="0" width="260" height="38" rx="12" fill="url(#glass)" stroke="#ffffff" stroke-opacity="0.9"/>
+      <rect x="4" y="4" width="84" height="30" rx="9" fill="#ffffff"/>
+      <text x="46" y="25" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+            font-size="19" font-weight="700" fill="#2d2521">计时</text>
+      <text x="148" y="25" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+            font-size="19" fill="#9a9188">统计</text>
+      <text x="212" y="25" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+            font-size="19" fill="#9a9188">设置</text>
+    </g>
+
+    <!-- The countdown ring with a 28% arc, as in the real running state. -->
+    <g transform="translate(218 178)">
+      <circle r="96" fill="none" stroke="#000000" stroke-opacity="0.07" stroke-width="8"/>
+      <!-- progress arc: 28% of a turn, starting at the top -->
+      <path d="M 0 -96 A 96 96 0 0 1 94.3 17.9" fill="none" stroke="#3b82f6" stroke-width="8" stroke-linecap="round"/>
+      <text x="0" y="6" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="44" font-weight="700" fill="#2d2521">18:00</text>
+      <text x="0" y="36" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+            font-size="18" fill="#9a9188">已完成 28%</text>
+    </g>
+
+    <!-- Controls: the primary action and the secondary 结束. -->
+    <g transform="translate(106 292)" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="19">
+      <rect x="0" y="-24" width="106" height="40" rx="12" fill="#3b82f6"/>
+      <text x="53" y="2" text-anchor="middle" fill="#ffffff" font-weight="600">暂停</text>
+      <rect x="118" y="-24" width="106" height="40" rx="12" fill="#ffffff" stroke="#d8d3cc"/>
+      <text x="171" y="2" text-anchor="middle" fill="#5c5148">结束</text>
+    </g>
+  </g>
+
+  <!-- The icon: a tomato sprouting the five bang colors, matching the
+       app icon's proportions — short stem fanning just above the fruit,
+       the whole tomato visible. -->
+  <g id="icon-motif" transform="translate(608 120)">
+    <!-- The five sprouts, one per bang color, back to front. They rise
+         from a shared root sitting on the tomato's top. -->
+    <path d="M 0 54 C -26 40 -42 20 -46 -2" fill="none" stroke="#589cbc" stroke-width="10" stroke-linecap="round"/>
+    <circle cx="-46" cy="-2" r="11" fill="#589cbc"/>
+    <path d="M 0 54 C 26 40 42 20 46 -2" fill="none" stroke="#e67183" stroke-width="10" stroke-linecap="round"/>
+    <circle cx="46" cy="-2" r="11" fill="#e67183"/>
+    <path d="M 0 54 C -14 32 -21 8 -22 -18" fill="none" stroke="#40a844" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="-22" cy="-18" r="12" fill="#40a844"/>
+    <path d="M 0 54 C 14 32 21 8 22 -18" fill="none" stroke="#b2913b" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="22" cy="-18" r="12" fill="#b2913b"/>
+    <path d="M 0 54 C -1 26 -1 0 0 -30" fill="none" stroke="#7777aa" stroke-width="12" stroke-linecap="round"/>
+    <circle cx="0" cy="-30" r="13" fill="#7777aa"/>
+    <!-- The tomato body: rx:ry = 118:111, as the real icon.
+         Bottom lands at 120+166+111=397, just above the 400 edge. -->
+    <ellipse cx="0" cy="166" rx="118" ry="111" fill="url(#tomato)"/>
+  </g>
+</svg>
